@@ -1,0 +1,34 @@
+{
+  "id": "com.study_tracker_combined.newplugin",
+  "name": "מעקב לימוד +",
+  "version": "1.3.4",
+  "description": "מעקב לימוד יומי, מפת ש\"ס/נ\"ך/משנה, טיימר זמן לימוד",
+  "author": "יאיר דניאל, יוסי כהן, סנאי",
+  "type": "webapp",
+  "entrypoint": "index.html",
+  "icon": "",
+  "category": "Utilities",
+  "stability": "beta",
+  "minAppVersion": "0.9.93",
+  "permissions": [
+    "events.subscribe:theme.changed",
+    "plugin.storage.read",
+    "plugin.storage.write",
+    "notifications.send",
+    "ui.feedback",
+    "reader.open",
+    "library.books.read",
+    "library.content.read",
+    "notifications.system",
+    "app.run_on_startup"
+  ],
+  "schemaVersion": 1,
+  "sdkVersion": "1.x",
+  "contributes": {
+    "toolTab": {
+      "title": "מעקב לימוד +",
+      "iconName": "book_clock_24_regular",
+      "defaultPinned": true
+    }
+  }
+}
