@@ -521,6 +521,21 @@ body {
     </div>
 
     <div class="settings-section">
+      <div class="settings-section-title">כותרות יחידות</div>
+      <div class="settings-item">
+        <div>
+          <div class="settings-item-label">מקור הכותרות</div>
+          <div class="settings-item-sub">מה יוצג לצד כל יחידה במפה וברשימה</div>
+        </div>
+        <div class="segment-group" id="toc-titles-seg" style="width:auto;">
+          <button class="segment-btn" data-val="auto"        onclick="setTocTitles('auto')">אוטומטי</button>
+          <button class="segment-btn" data-val="descriptive" onclick="setTocTitles('descriptive')">כותרות</button>
+          <button class="segment-btn" data-val="numbering"   onclick="setTocTitles('numbering')">מספור</button>
+        </div>
+      </div>
+    </div>
+
+    <div class="settings-section">
       <div class="settings-section-title">נושאי טיימר</div>
       <div class="settings-item clickable" id="settings-timer-subjects">
         <div class="settings-item-label">ערוך נושאים</div>
@@ -953,7 +968,7 @@ let timerData={
   ],
   sessions:[]
 };
-let settings={showMap:true,dateFormat:'hebrew',excludeFriday:false,excludeShabbat:false,reminders:[],autoTrackReminders:false,autoTrackTime:'20:00'};
+let settings={showMap:true,dateFormat:'hebrew',excludeFriday:false,excludeShabbat:false,reminders:[],autoTrackReminders:false,autoTrackTime:'20:00',tocTitles:'auto'};
 
 async function loadAll(){
   try{const r=await Otzaria.call('storage.get',{key:KEY_PLANS});   if(r.success&&r.data)plans=r.data;}catch(e){}
@@ -1344,8 +1359,11 @@ function lookupKnownBook(name){
 // ── ניתוח חכם של תוכן-עניינים: זיהוי מספר יחידות הלימוד והתווית מתוך ה-TOC ──
 // סופר רשומות לפי מילת-המפתח (סימן/פרק/דף...) ובוחר בנפוצה ביותר. עדיף על
 // ספירת רמה בודדת (עליונה = מעט חלקים; עמוקה = עלול לספור הערות/משנה-סעיפים).
-function analyzeToc(data){
+/* mode: 'auto' - ההיוריסטיקה המקורית; 'descriptive' - תמיד הכותרות
+   התיאוריות; 'numbering' - תמיד המונה ("פרק א"). ראו setTocTitles. */
+function analyzeToc(data,mode){
   if(!Array.isArray(data)||!data.length)return null;
+  mode=mode||settings.tocTitles||'auto';
   const KW=['סימן','פרק','דף','שער','מצוה','הלכה','משנה'];
   let best=null;
   for(const kw of KW){
@@ -1356,9 +1374,12 @@ function analyzeToc(data){
     // אם הכותרות שנמצאו הן רק "<מילת מפתח> <אות/מספר>" בלי תוכן נוסף (כלומר סתם מונה,
     // למשל "פרק א" בלי התוכן האמיתי) — ננסה למצוא רמה אחרת בתוכן העניינים עם אותה כמות
     // רשומות בדיוק אך תוכן תיאורי אמיתי וארוך יותר, ונשתמש בכותרות שלה במקום.
+    if(mode==='numbering')return best;
     const bareRe=new RegExp('^\\s*'+best.unitLabel+'\\s*[א-ת0-9"\'׳״]{0,5}\\s*$');
     const bareCount=best.titles.filter(t=>bareRe.test((''+t).trim())).length;
-    if(bareCount>=best.titles.length*0.7){
+    /* ב-'descriptive' לא נדרש ששבעים אחוז מהכותרות יהיו מונה חשוף: המשתמש
+       ביקש במפורש את הכותרות התיאוריות, גם כשההיוריסטיקה לא בוחרת בהן. */
+    if(mode==='descriptive'||bareCount>=best.titles.length*0.7){
       const byLevel={};data.forEach(e=>{const l=(e&&e.level)||1;(byLevel[l]=byLevel[l]||[]).push((e&&e.text)||'');});
       let candidate=null;
       for(const l in byLevel){
@@ -2761,6 +2782,7 @@ function renderSettings(){
   document.getElementById('toggle-show-map').classList.toggle('on',settings.showMap);
   // date format — toggle active state
   document.querySelectorAll('#date-format-seg .segment-btn').forEach(b=>b.classList.toggle('active',b.dataset.val===settings.dateFormat));
+  document.querySelectorAll('#toc-titles-seg .segment-btn').forEach(b=>b.classList.toggle('active',b.dataset.val===(settings.tocTitles||'auto')));
   document.getElementById('date-format-example').textContent=formatDate(todayStr());
   // use .onclick to prevent duplicate listeners on re-render
   document.getElementById('settings-timer-subjects').onclick=()=>{goScreen('timer');switchTimerTab('topics');};
@@ -2781,6 +2803,24 @@ async function toggleExcludeShabbat(){
   else if(currentScreen==='quota')renderQuota();
 }
 async function toggleMapVisibility(){settings.showMap=!settings.showMap;document.getElementById('toggle-show-map').classList.toggle('on',settings.showMap);document.getElementById('ntab-map').style.display=settings.showMap?'':'none';await saveSettings();}
+/* שינוי המקור מחייב שליפה מחדש: הכותרות נשמרות לצד כל ספר ברגע שנוסף
+   למעקב, ובלי ניקוי הן היו נשארות כפי שהיו תחת ההגדרה הקודמת. ההתקדמות
+   והסימונים אינם נוגעים - נמחק רק שדה titles. */
+async function setTocTitles(v){
+  if((settings.tocTitles||'auto')===v){renderSettings();return;}
+  settings.tocTitles=v;
+  await saveSettings();
+  let changed=false;
+  for(const b of (mapData.custom_books||[])){
+    if(!b||typeof b!=='object')continue;
+    if(Array.isArray(b.books))b.books.forEach(bk=>{if(bk&&bk.titles){delete bk.titles;changed=true;}});
+    if(b.titles){delete b.titles;changed=true;}
+  }
+  if(changed){rebuildCustomRefs();await saveMap();try{await backfillTitles();}catch(e){}}
+  renderSettings();
+  goScreen(currentScreen);
+}
+
 async function setDateFormat(fmt){settings.dateFormat=fmt;await saveSettings();renderSettings();if(currentScreen==='home')renderHome();else if(currentScreen==='quota')renderQuota();else if(currentScreen==='timer')renderTimer();}
 function exportData(){const data={plans,mapData,timerData,settings,exported:new Date().toISOString()};const blob=new Blob([JSON.stringify(data,null,2)],{type:'application/json'});const url=URL.createObjectURL(blob);const a=document.createElement('a');a.href=url;a.download=`מעקב_לימוד_גיבוי_${todayStr()}.json`;a.click();URL.revokeObjectURL(url);}
 async function importData(event){const file=event.target.files[0];if(!file)return;try{const text=await file.text(),data=JSON.parse(text);if(!data||typeof data!=='object')throw new Error('invalid');if(Array.isArray(data.plans))plans=data.plans;if(data.mapData&&typeof data.mapData==='object'){mapData=data.mapData;if(!mapData.custom_books)mapData.custom_books=[];rebuildCustomRefs();}if(data.timerData&&typeof data.timerData==='object')timerData=data.timerData;if(data.settings&&typeof data.settings==='object')settings={...settings,...data.settings};await savePlans();await saveMap();await saveTimer();await saveSettings();const planCount=plans.length,sessionCount=(timerData.sessions||[]).length,topicCount=(timerData.topics||[]).length;
