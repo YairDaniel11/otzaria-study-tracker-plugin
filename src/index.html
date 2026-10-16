@@ -840,7 +840,7 @@ body {
       <div style="font-size:0.72em;color:var(--color-outline);margin-top:3px;">כולל תוכניות לימוד וגם מסלולי המפה (ש"ס/נ"ך/משנה)</div>
     </div>
     <div class="form-row">
-      <div class="input-group">
+      <div class="input-group" id="reminder-time-wrap">
         <label class="input-label">שעה</label>
         <input class="input" type="time" id="reminder-dlg-time" value="20:00" style="direction:ltr;" />
       </div>
@@ -849,9 +849,11 @@ body {
         <div class="segment-group" id="reminder-repeat-seg">
           <button class="segment-btn active" data-val="daily" onclick="setReminderRepeat('daily')">יומי</button>
           <button class="segment-btn" data-val="weekly" onclick="setReminderRepeat('weekly')">שבועי</button>
+          <button class="segment-btn" data-val="startup" onclick="setReminderRepeat('startup')">בפתיחת אוצריא</button>
         </div>
       </div>
     </div>
+    <div id="reminder-startup-hint" style="display:none;font-size:0.72em;color:var(--color-outline);margin:-4px 0 8px;">התזכורת תקפוץ פעם אחת ביום, ברגע שאוצריא עולה (גם בלי לפתוח את התוסף)</div>
     <div id="reminder-weekday-wrap" style="display:none;" class="input-group">
       <label class="input-label">יום בשבוע</label>
       <select class="input" id="reminder-dlg-weekday" style="direction:rtl;">
@@ -957,7 +959,7 @@ function applyTheme(theme){
 }
 
 // ════ DATA ════
-const KEY_PLANS='mlr_plans_v1', KEY_MAP='mlr_map_v1', KEY_TIMER='mlr_timer_v1', KEY_SETTINGS='mlr_settings_v1';
+const KEY_PLANS='mlr_plans_v1', KEY_MAP='mlr_map_v1', KEY_TIMER='mlr_timer_v1', KEY_SETTINGS='mlr_settings_v1', KEY_STARTUP_FIRED='mlr_startup_fired_v1';
 let plans=[], mapData={active_tracks:[],current_track:'shas',shas:null,nach:null,mishna:null,grid_view:'circle'};
 let timerData={
   topics:[
@@ -2629,6 +2631,8 @@ function buildTargetStudyText(target,onlyUndone,dateStr){
 function setReminderRepeat(val){
   document.querySelectorAll('#reminder-repeat-seg .segment-btn').forEach(b=>b.classList.toggle('active',b.dataset.val===val));
   document.getElementById('reminder-weekday-wrap').style.display=val==='weekly'?'':'none';
+  document.getElementById('reminder-time-wrap').style.display=val==='startup'?'none':'';
+  document.getElementById('reminder-startup-hint').style.display=val==='startup'?'':'none';
 }
 function openReminderDialog(remId){
   const rem=remId?(settings.reminders||[]).find(r=>r.id===remId):null;
@@ -2720,12 +2724,12 @@ function renderRemindersSettings(){
   if(timeWrap){timeWrap.style.display=settings.autoTrackReminders?'':'none';const ti=document.getElementById('auto-reminder-time');if(ti)ti.value=settings.autoTrackTime||'20:00';}
   const list=document.getElementById('settings-reminders-list');if(!list)return;list.innerHTML='';
   const reminders=settings.reminders||[];
-  const repeatLabel={daily:'יומי',weekly:'שבועי'};
+  const repeatLabel={daily:'יומי',weekly:'שבועי',startup:'בפתיחת אוצריא'};
   const dayLabel=['ראשון','שני','שלישי','רביעי','חמישי','שישי','שבת'];
   if(!reminders.length&&!settings.autoTrackReminders){const empty=document.createElement('div');empty.className='settings-item';empty.innerHTML='<span style="font-size:0.82em;color:var(--color-outline);">אין תזכורות מוגדרות</span>';list.appendChild(empty);return;}
   reminders.forEach(r=>{
     const item=document.createElement('div');item.className='settings-item';
-    const sub=`${r.time} · ${repeatLabel[r.repeat]||r.repeat}${r.repeat==='weekly'?` · ${dayLabel[r.weekday]||''}`:''} · ${reminderTargetLabel(reminderTarget(r))}`;
+    const sub=`${r.repeat==='startup'?'':r.time+' · '}${repeatLabel[r.repeat]||r.repeat}${r.repeat==='weekly'?` · ${dayLabel[r.weekday]||''}`:''} · ${reminderTargetLabel(reminderTarget(r))}`;
     item.innerHTML=`<div style="flex:1;cursor:pointer;" onclick="openReminderDialog('${r.id}')"><div class="settings-item-label">${r.label}</div><div class="settings-item-sub">${sub}</div></div><div class="toggle-switch${r.enabled?' on':''}" onclick="toggleReminder('${r.id}')"></div>`;
     list.appendChild(item);
   });
@@ -2742,6 +2746,7 @@ async function scheduleAllReminders(){
   for(const r of getEffectiveReminders()){await scheduleReminderOccurrences(r);}
 }
 async function scheduleReminderOccurrences(r){
+  if(r.repeat==='startup')return;
   const[hh,mm]=(r.time||'20:00').split(':').map(Number);
   const now=new Date(),count=r.repeat==='daily'?14:r.repeat==='weekly'?8:1;
   let d=new Date(now);d.setHours(hh,mm,0,0);
@@ -2763,6 +2768,7 @@ async function scheduleReminderOccurrences(r){
 async function checkDueReminders(){
   const now=new Date(),twoHoursAgo=new Date(now-2*3600000);
   for(const r of getEffectiveReminders()){
+    if(r.repeat==='startup')continue;
     const[hh,mm]=(r.time||'20:00').split(':').map(Number);
     const fire=new Date();fire.setHours(hh,mm,0,0);
     if(fire<twoHoursAgo||fire>now)continue;
@@ -2772,6 +2778,29 @@ async function checkDueReminders(){
     if(r.includeStudy){const study=buildTargetStudyText(reminderTarget(r),true,todayStr());if(study)msg+=` — עוד לא למדת: ${study}`;}
     try{await Otzaria.call('notifications.showInApp',{message:msg,type:'info'});}catch(e){}
   }
+}
+
+// Reminders of type 'startup' fire once a day, when Otzaria comes up. The background instance (app.startup)
+// shows an OS notification, so it works without opening the plugin tab; opening the tab later the same day
+// doesn't repeat it. The per-day marker lives in its own key so the two instances never overwrite settings.
+async function fireStartupReminders(background){
+  const list=getEffectiveReminders().filter(r=>r.repeat==='startup');
+  if(!list.length)return;
+  let fired={};
+  try{const r=await Otzaria.call('storage.get',{key:KEY_STARTUP_FIRED});if(r.success&&r.data)fired=r.data;}catch(e){}
+  const today=todayStr();let changed=false;
+  for(const r of list){
+    if(fired[r.id]===today)continue;
+    if(reminderShouldSkip(r,today))continue;
+    let body=r.label;
+    if(r.includeStudy){const study=buildTargetStudyText(reminderTarget(r),true,today);if(study)body+=`\nהלימוד של היום: ${study}`;}
+    try{
+      if(background)await Otzaria.call('notifications.sendSystem',{title:'תזכורת לימוד',body});
+      else await Otzaria.call('notifications.showInApp',{message:body.replace('\n',' — '),type:'info'});
+      fired[r.id]=today;changed=true;
+    }catch(e){}
+  }
+  if(changed)try{await Otzaria.call('storage.set',{key:KEY_STARTUP_FIRED,value:fired});}catch(e){}
 }
 
 // ════ SETTINGS ════
@@ -2837,6 +2866,7 @@ Otzaria.on('plugin.boot',async function(payload){
   // even when the plugin tab isn't open, and roll the scheduling window forward on every app launch.
   if(payload&&payload.app&&payload.app.runMode==='background'){
     await scheduleAllReminders();
+    await fireStartupReminders(true);
     return;
   }
   applyTheme(payload.theme);
@@ -2849,6 +2879,7 @@ Otzaria.on('plugin.boot',async function(payload){
   renderHome();
   await ensureNotifPermission();
   await checkDueReminders();
+  await fireStartupReminders(false);
   await scheduleAllReminders();
 });
 Otzaria.on('theme.changed',applyTheme);
